@@ -1,0 +1,10 @@
+---
+
+base_www_dir: /var/www
+site_prefix: wordpress
+www_user: www-data
+apache_dir: /etc/apache2
+max_upload: 256M
+max_post: 256M
+fresh_install: true
+remove_default: true 

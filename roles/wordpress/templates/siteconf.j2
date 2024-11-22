@@ -1,0 +1,17 @@
+<VirtualHost *:80>
+    DocumentRoot {{ base_www_dir }}/{{ site_prefix }}
+    Servername {{ domain }}
+    <Directory /{{ base_www_dir }}/{{ site_prefix }}>
+        Options FollowSymLinks
+        AllowOverride Limit Options FileInfo
+        DirectoryIndex index.php
+        Require all granted
+    </Directory>
+    <Directory {{ base_www_dir }}/{{ site_prefix }}/wp-content>
+        Options FollowSymLinks
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/{{ site_prefix }}_error.log
+    CustomLog ${APACHE_LOG_DIR}/{{ site_prefix }}_access.log combined
+</VirtualHost>

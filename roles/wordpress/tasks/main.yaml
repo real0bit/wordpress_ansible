@@ -1,0 +1,184 @@
+---
+
+- name: Update apt
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: fresh_install
+
+- name: Install prerequisites
+  become: true
+  apt:
+    pkg:
+      - apache2
+      - ghostscript
+      - libapache2-mod-php
+      - mysql-server
+      - php
+      - php-bcmath
+      - php-curl
+      - php-imagick
+      - php-intl
+      - php-json
+      - php-mbstring
+      - php-mysql
+      - php-xml
+      - php-zip
+      - makepasswd
+      - whois
+      - python3-pymysql
+  when: fresh_install
+
+- name: Download the latest version of Wordpress
+  get_url:
+    url: https://wordpress.org/latest.tar.gz
+    dest: /tmp/wordpress_latest.tar.gz
+
+- name: Create the temporary unpack destination
+  file:
+    path: /tmp/wpunpack
+    state: directory
+
+- name: Create the destination directory
+  file:
+    path: '{{ base_www_dir }}/{{ site_prefix }}'
+    state: directory
+    owner: '{{ www_user }}'
+    group: '{{ www_user }}'
+
+- name: Extract Wordpress
+  unarchive:
+    remote_src: true
+    src: /tmp/wordpress_latest.tar.gz
+    group: '{{ www_user }}'
+    owner: '{{ www_user }}'
+    dest: /tmp/wpunpack
+
+- name: Copy Wordpress files to the web server directory
+  copy:
+    remote_src: true
+    src: /tmp/wpunpack/wordpress/
+    dest: '{{ base_www_dir }}/{{ site_prefix }}/'
+    group: '{{ www_user }}'
+    owner: '{{ www_user }}'
+ 
+- name: Generate password for new DB user
+  shell: makepasswd --chars=20
+  register: db_password
+
+- name: List DB password
+  debug:
+    msg: "New database password is {{ db_password }}"
+
+- name: Create directory to build Wordpress configuration
+  file: 
+    path: /tmp/wpconfig
+    state: directory
+
+- name: Get random values for Wordpress configuration
+  get_url:
+    url: https://api.wordpress.org/secret-key/1.1/salt/
+    dest: /tmp/wpconfig/02_wp-config
+
+- name: Transfer top portion of configuration
+  template:
+    src: wp-config_top.j2
+    dest: /tmp/wpconfig/01_wp-config
+
+- name: Copy bottom portion of configuration
+  copy:
+    src: wp_config_bottom.php
+    dest: /tmp/wpconfig/03_wp-config
+
+- name: Assemble config fragments and drop in to Wordpress directory
+  assemble:
+    src: /tmp/wpconfig
+    dest: '{{ base_www_dir }}/{{ site_prefix }}/wp-config.php'
+
+- name: Add database for Wordpress
+  community.mysql.mysql_db:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    name: "wpdb_{{ site_prefix }}"
+    state: present
+
+- name: Add database user for wordpress
+  community.mysql.mysql_user:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    name: "wpuser_{{ site_prefix }}"
+    password: '{{ db_password.stdout }}'
+    host: localhost
+    priv: 'wpdb_{{ site_prefix }}.*:SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,ALTER'
+    state: present
+
+- name: Remove default site
+  file:
+    path: '{{ apache_dir }}/sites-enabled/000-default.conf'
+    state: absent
+  when: remove_default
+
+- name: Create site configuration for Apache from the template
+  template:
+    src: siteconf.j2
+    dest: '{{ apache_dir }}/sites-available/{{ site_prefix }}.conf'
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Enable mod_rewrite module
+  community.general.apache2_module:
+    state: present
+    name: rewrite
+  when: fresh_install
+
+- name: Enable new site
+  file:
+    src: '{{ apache_dir }}/sites-available/{{ site_prefix }}.conf'
+    dest: '{{ apache_dir }}/sites-enabled/{{ site_prefix }}.conf'
+    owner: root
+    group: root
+    state: link
+
+- name: Find php.ini
+  find:
+    paths: /etc/php
+    use_regex: yes
+    recurse: yes
+    file_type: directory
+    patterns: '.*apache2$'
+  register: find_result
+  when: fresh_install
+
+- name: Replace default upload_max_filesize in php.ini
+  lineinfile:
+    path: "{{ find_result.files[0].path }}/php.ini"
+    regex: "^upload_max_filesize.*"
+    line: "upload_max_filesize = {{ max_upload }}"
+  when: fresh_install
+
+- name: Replace default post_max_filesize in php.ini
+  lineinfile:
+    path: "{{ find_result.files[0].path }}/php.ini"
+    regex: "^post_max_size.*"
+    line: "post_max_size = {{ max_post }}"
+  when: fresh_install
+
+- name: Restart/enable Apache2
+  systemd_service:
+    name: apache2
+    state: restarted
+    enabled: true
+
+- name: Clean up Wordpress temp directory
+  file:
+    path: /tmp/wpunpack
+    state: absent
+
+- name: Clean up Wordpress config directory
+  file:
+    path: /tmp/wpconfig
+    state: absent
+
+- name: Clean up Wordpress tar file
+  file:
+    path: /tmp/wordpress_latest.tar.gz
+    state: absent
