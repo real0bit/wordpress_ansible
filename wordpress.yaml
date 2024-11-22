@@ -3,9 +3,8 @@
 - hosts: wordpress
   gather_facts: true
   vars:
-    domain: poofs.wp.internal
-    site_prefix: cheesypoofs
-    fresh_install: false
+    domain: www.mywordpressdomain.com
+    site_prefix: mywordpresssite
 
   roles:
     - role: wordpress
